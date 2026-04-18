@@ -1,3 +1,4 @@
+from google.genai import types
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
@@ -35,10 +36,9 @@ def handle_message(event):
     user_message = event.message.text
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=SYSTEM_PROMPT + "\n\n題目：" + user_message
-            config={"max_output_tokens": 300},
-        )
+    model="gemini-2.0-flash",
+    contents="請用繁體中文回答：" + user_message
+)
         reply_text = response.text
     except Exception:
         reply_text = "抱歉，系統暫時無法回應，請稍後再試。"
