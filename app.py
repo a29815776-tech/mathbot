@@ -36,7 +36,7 @@ def handle_message(event):
     user_message = event.message.text
     try:
         response = client.models.generate_content(
-    model="gemini-2.0-flash-lite",
+    model="gemini-2.0-flash-exp",
     contents="請用繁體中文回答：" + user_message
 )
         reply_text = response.text
