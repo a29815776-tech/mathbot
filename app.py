@@ -40,7 +40,8 @@ def handle_message(event):
     contents="請用繁體中文回答：" + user_message
 )
         reply_text = response.text
-    except Exception:
+    except Exception as e:
+        print(f"Gemini error: {e}")
         reply_text = "抱歉，系統暫時無法回應，請稍後再試。"
     line_bot_api.reply_message(
         event.reply_token,
