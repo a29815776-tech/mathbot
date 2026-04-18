@@ -37,6 +37,7 @@ def handle_message(event):
         response = client.models.generate_content(
             model="gemini-2.0-flash",
             contents=SYSTEM_PROMPT + "\n\n題目：" + user_message
+            config={"max_output_tokens": 300},
         )
         reply_text = response.text
     except Exception:
