@@ -2,7 +2,7 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import google.generativeai as genai
+from google import genai
 import os
 
 app = Flask(__name__)
@@ -10,8 +10,7 @@ app = Flask(__name__)
 line_bot_api = LineBotApi(os.environ.get("LINE_CHANNEL_ACCESS_TOKEN"))
 handler = WebhookHandler(os.environ.get("LINE_CHANNEL_SECRET"))
 
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-model = genai.GenerativeModel("gemini-1.5-flash")
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
 SYSTEM_PROMPT = """你是一個專門幫助台灣高中生解數學題的助手，針對108課綱設計。
 解題規則：
@@ -35,7 +34,10 @@ def callback():
 def handle_message(event):
     user_message = event.message.text
     try:
-        response = model.generate_content(SYSTEM_PROMPT + "\n\n題目：" + user_message)
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=SYSTEM_PROMPT + "\n\n題目：" + user_message
+        )
         reply_text = response.text
     except Exception:
         reply_text = "抱歉，系統暫時無法回應，請稍後再試。"
