@@ -2,24 +2,24 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import anthropic
+import google.generativeai as genai
 import os
 
 app = Flask(__name__)
 
 line_bot_api = LineBotApi(os.environ.get("LINE_CHANNEL_ACCESS_TOKEN"))
 handler = WebhookHandler(os.environ.get("LINE_CHANNEL_SECRET"))
-anthropic_client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 SYSTEM_PROMPT = """你是一個專門幫助台灣高中生解數學題的助手，針對108課綱設計。
-
 解題規則：
 1. 用繁體中文回答
-2. 解題步驟要清楚，符合學測/分科測驗的格式
-3. 每個步驟都要說明理由
-4. 最後要寫出「答：」
-5. 如果題目不清楚，請要求對方補充
-6. 只回答數學相關問題，其他問題請禮貌拒絕"""
+2. 解題步驟清楚，符合學測格式
+3. 每個步驟說明理由
+4. 最後寫出「答：」
+5. 只回答數學相關問題"""
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -35,13 +35,8 @@ def callback():
 def handle_message(event):
     user_message = event.message.text
     try:
-        response = anthropic_client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1000,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_message}]
-        )
-        reply_text = response.content[0].text
+        response = model.generate_content(SYSTEM_PROMPT + "\n\n題目：" + user_message)
+        reply_text = response.text
     except Exception:
         reply_text = "抱歉，系統暫時無法回應，請稍後再試。"
     line_bot_api.reply_message(
