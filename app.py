@@ -225,6 +225,13 @@ def handle_message(event):
             logger.error(f"Admin reply error: {ex}")
         return
 
+    if user_message.strip() in ["我的id", "my id", "myid", "我的ID", "MY ID"]:
+        try:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"你的 LINE ID 是：{user_id}"))
+        except Exception as e:
+            logger.error(f"ID reply error: {e}")
+        return
+
     if user_message.strip() in ["訂閱", "subscribe", "付費", "升級"]:
         try:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=SUBSCRIBE_MSG))
