@@ -66,7 +66,7 @@ def handle_message(event):
                 {"role": "user", "content": user_message}
             ]
         )
-        reply_text = response.choices[0].message.content
+        reply_text = response.choices[0].message.content[:4900]
         logger.info(f"Groq reply: {reply_text[:100]}")
     except Exception as e:
         logger.error(f"Groq error: {e}\n{traceback.format_exc()}")
