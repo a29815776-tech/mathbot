@@ -111,6 +111,17 @@ def callback():
         abort(500)
     return 'OK'
 
+SUBSCRIBE_MSG = """訂閱進階版數學機器人
+
+費用：每月 320 元
+
+付款方式：
+第一銀行 帳號 212-57048971
+
+付款後請將轉帳截圖傳送至 LINE ID：a0970801250，並告知您的 LINE ID，確認後將為您開通進階版。
+
+進階版功能：更強的 AI 模型，數學推理更準確"""
+
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_id = event.source.user_id
@@ -118,6 +129,13 @@ def handle_message(event):
     model = get_model(user_id)
     is_paid = user_id in PAID_USER_IDS
     logger.info(f"User {user_id} ({'paid' if is_paid else 'free'}): {user_message}")
+
+    if user_message.strip() in ["訂閱", "subscribe", "付費", "升級"]:
+        try:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=SUBSCRIBE_MSG))
+        except Exception as e:
+            logger.error(f"Subscribe reply error: {e}")
+        return
 
     if user_id not in conversation_history:
         conversation_history[user_id] = []
