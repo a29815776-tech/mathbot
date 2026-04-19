@@ -8,6 +8,8 @@ import logging
 import traceback
 import base64
 import re
+import requests
+import json
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,6 +26,39 @@ groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 # 付費用戶的 LINE user ID，用逗號分隔存在環境變數 PAID_USER_IDS
 PAID_USER_IDS = set(uid.strip() for uid in os.environ.get("PAID_USER_IDS", "").split(",") if uid.strip())
+ADMIN_LINE_ID = os.environ.get("ADMIN_LINE_ID", "")
+RAILWAY_API_TOKEN = os.environ.get("RAILWAY_API_TOKEN", "")
+RAILWAY_PROJECT_ID = os.environ.get("RAILWAY_PROJECT_ID", "")
+RAILWAY_ENVIRONMENT_ID = os.environ.get("RAILWAY_ENVIRONMENT_ID", "")
+RAILWAY_SERVICE_ID = os.environ.get("RAILWAY_SERVICE_ID", "")
+
+def add_paid_user(new_user_id):
+    current = set(uid.strip() for uid in os.environ.get("PAID_USER_IDS", "").split(",") if uid.strip())
+    current.add(new_user_id)
+    PAID_USER_IDS.add(new_user_id)
+    new_value = ",".join(current)
+
+    query = """
+    mutation variableUpsert($input: VariableUpsertInput!) {
+        variableUpsert(input: $input)
+    }
+    """
+    variables = {
+        "input": {
+            "projectId": RAILWAY_PROJECT_ID,
+            "environmentId": RAILWAY_ENVIRONMENT_ID,
+            "serviceId": RAILWAY_SERVICE_ID,
+            "name": "PAID_USER_IDS",
+            "value": new_value
+        }
+    }
+    resp = requests.post(
+        "https://backboard.railway.app/graphql/v2",
+        headers={"Authorization": f"Bearer {RAILWAY_API_TOKEN}", "Content-Type": "application/json"},
+        json={"query": query, "variables": variables},
+        timeout=10
+    )
+    return resp.json()
 
 FREE_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 PAID_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"  # 之後換成 Claude
@@ -129,6 +164,19 @@ def handle_message(event):
     model = get_model(user_id)
     is_paid = user_id in PAID_USER_IDS
     logger.info(f"User {user_id} ({'paid' if is_paid else 'free'}): {user_message}")
+
+    if user_id == ADMIN_LINE_ID and user_message.strip().startswith("!approve "):
+        target_id = user_message.strip().split(" ", 1)[1].strip()
+        try:
+            add_paid_user(target_id)
+            reply = f"已開通付費版：{target_id}"
+        except Exception as e:
+            reply = f"開通失敗：{e}"
+        try:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+        except Exception as ex:
+            logger.error(f"Admin reply error: {ex}")
+        return
 
     if user_message.strip() in ["訂閱", "subscribe", "付費", "升級"]:
         try:
