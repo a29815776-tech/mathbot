@@ -1,11 +1,12 @@
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, TextSendMessage
+from linebot.models import MessageEvent, TextMessage, ImageMessage, TextSendMessage
 from groq import Groq
 import os
 import logging
 import traceback
+import base64
 
 logging.basicConfig(
     level=logging.INFO,
@@ -98,6 +99,38 @@ def handle_message(event):
             TextSendMessage(text=reply_text)
         )
         logger.info("Reply sent successfully")
+    except Exception as e:
+        logger.error(f"LINE reply error: {e}\n{traceback.format_exc()}")
+
+@handler.add(MessageEvent, message=ImageMessage)
+def handle_image(event):
+    user_id = event.source.user_id
+    logger.info(f"User {user_id} sent an image")
+    try:
+        message_content = line_bot_api.get_message_content(event.message.id)
+        image_data = b"".join(chunk for chunk in message_content.iter_content())
+        image_base64 = base64.b64encode(image_data).decode("utf-8")
+
+        response = client.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "請看這張圖片中的數學題目並解題。"},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
+                ]}
+            ]
+        )
+        reply_text = response.choices[0].message.content[:4900]
+        logger.info(f"Vision reply: {reply_text[:100]}")
+    except Exception as e:
+        logger.error(f"Image handling error: {e}\n{traceback.format_exc()}")
+        reply_text = "抱歉，無法處理圖片，請稍後再試。"
+    try:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=reply_text)
+        )
     except Exception as e:
         logger.error(f"LINE reply error: {e}\n{traceback.format_exc()}")
 
