@@ -10,6 +10,8 @@ import base64
 import re
 import requests
 import json
+import psycopg2
+from datetime import datetime
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,6 +29,51 @@ groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 # 付費用戶的 LINE user ID，用逗號分隔存在環境變數 PAID_USER_IDS
 PAID_USER_IDS = set(uid.strip() for uid in os.environ.get("PAID_USER_IDS", "").split(",") if uid.strip())
 ADMIN_LINE_ID = os.environ.get("ADMIN_LINE_ID", "")
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+MONTHLY_QUOTA = 200
+
+def get_db():
+    return psycopg2.connect(DATABASE_URL)
+
+def init_db():
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS usage (
+                    user_id TEXT PRIMARY KEY,
+                    count INTEGER DEFAULT 0,
+                    month TEXT
+                )
+            """)
+
+def get_usage(user_id):
+    month = datetime.now().strftime("%Y-%m")
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT count, month FROM usage WHERE user_id = %s", (user_id,))
+            row = cur.fetchone()
+            if not row or row[1] != month:
+                cur.execute("""
+                    INSERT INTO usage (user_id, count, month) VALUES (%s, 0, %s)
+                    ON CONFLICT (user_id) DO UPDATE SET count = 0, month = %s
+                """, (user_id, month, month))
+                return 0
+            return row[0]
+
+def increment_usage(user_id):
+    month = datetime.now().strftime("%Y-%m")
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO usage (user_id, count, month) VALUES (%s, 1, %s)
+                ON CONFLICT (user_id) DO UPDATE SET count = usage.count + 1, month = %s
+            """, (user_id, month, month))
+
+try:
+    init_db()
+    logger.info("Database initialized")
+except Exception as e:
+    logger.error(f"DB init error: {e}")
 RAILWAY_API_TOKEN = os.environ.get("RAILWAY_API_TOKEN", "")
 RAILWAY_PROJECT_ID = os.environ.get("RAILWAY_PROJECT_ID", "")
 RAILWAY_ENVIRONMENT_ID = os.environ.get("RAILWAY_ENVIRONMENT_ID", "")
@@ -185,6 +232,17 @@ def handle_message(event):
             logger.error(f"Subscribe reply error: {e}")
         return
 
+    if is_paid:
+        try:
+            usage = get_usage(user_id)
+            if usage >= MONTHLY_QUOTA:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                    text=f"本月 {MONTHLY_QUOTA} 題額度已用完，請傳「訂閱」了解加購方式。"
+                ))
+                return
+        except Exception as e:
+            logger.error(f"Usage check error: {e}")
+
     if user_id not in conversation_history:
         conversation_history[user_id] = []
 
@@ -197,6 +255,11 @@ def handle_message(event):
         response = call_ai(model, [{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history[user_id])
         reply_text = clean_response(response.choices[0].message.content)[:4900]
         conversation_history[user_id].append({"role": "assistant", "content": reply_text})
+        if is_paid:
+            try:
+                increment_usage(user_id)
+            except Exception as e:
+                logger.error(f"Usage increment error: {e}")
         logger.info(f"Reply: {reply_text[:100]}")
     except Exception as e:
         logger.error(f"AI error: {e}\n{traceback.format_exc()}")
