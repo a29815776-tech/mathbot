@@ -9,7 +9,6 @@ import traceback
 import base64
 import re
 import requests
-import json
 import psycopg2
 from datetime import datetime
 
@@ -200,8 +199,6 @@ SUBSCRIBE_MSG = """訂閱進階版數學機器人
 付款方式：
 1. 第一銀行（代碼 007）帳號 21257048971
 2. 街口支付 帳號 905432635
-3. 超商代碼繳費（請先聯繫取得代碼）
-
 付款後請將截圖傳送至 LINE ID：a0970801250，並告知您的 LINE ID（傳「我的ID」可查詢），確認後將為您開通進階版。
 
 進階版功能：更強的 AI 模型，數學推理更準確"""
@@ -260,6 +257,7 @@ def handle_message(event):
     if len(conversation_history[user_id]) > MAX_HISTORY:
         conversation_history[user_id] = conversation_history[user_id][-MAX_HISTORY:]
 
+    reply_text = "抱歉，系統暫時無法回應，請稍後再試。"
     try:
         response = call_ai(model, [{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history[user_id])
         reply_text = clean_response(response.choices[0].message.content)[:4900]
@@ -272,7 +270,6 @@ def handle_message(event):
         logger.info(f"Reply: {reply_text[:100]}")
     except Exception as e:
         logger.error(f"AI error: {e}\n{traceback.format_exc()}")
-        reply_text = "抱歉，系統暫時無法回應，請稍後再試。"
     try:
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         logger.info("Reply sent successfully")
@@ -282,8 +279,21 @@ def handle_message(event):
 @handler.add(MessageEvent, message=ImageMessage)
 def handle_image(event):
     user_id = event.source.user_id
+    is_paid = user_id in PAID_USER_IDS
     model = get_model(user_id)
     logger.info(f"User {user_id} sent an image")
+
+    if is_paid:
+        try:
+            usage = get_usage(user_id)
+            if usage >= MONTHLY_QUOTA:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                    text=f"本月 {MONTHLY_QUOTA} 題額度已用完，請傳「訂閱」了解加購方式。"
+                ))
+                return
+        except Exception as e:
+            logger.error(f"Usage check error: {e}")
+
     try:
         message_content = line_bot_api.get_message_content(event.message.id)
         image_data = b"".join(chunk for chunk in message_content.iter_content())
@@ -297,6 +307,11 @@ def handle_image(event):
             ]}
         ])
         reply_text = clean_response(response.choices[0].message.content)[:4900]
+        if is_paid:
+            try:
+                increment_usage(user_id)
+            except Exception as e:
+                logger.error(f"Usage increment error: {e}")
         logger.info(f"Vision reply: {reply_text[:100]}")
     except Exception as e:
         logger.error(f"Image handling error: {e}\n{traceback.format_exc()}")
