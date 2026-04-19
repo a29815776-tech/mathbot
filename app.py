@@ -270,9 +270,16 @@ def handle_message(event):
         return
 
     if is_paid:
-        period = datetime.now().strftime("%Y-%m")
-        quota = MONTHLY_QUOTA
-        quota_msg = f"本月 {MONTHLY_QUOTA} 題額度已用完，請傳「訂閱」了解加購方式。"
+        month_period = datetime.now().strftime("%Y-%m")
+        monthly_usage = get_usage(user_id, month_period)
+        if monthly_usage < MONTHLY_QUOTA:
+            period = month_period
+            quota = MONTHLY_QUOTA
+            quota_msg = ""
+        else:
+            period = datetime.now().strftime("%Y-%m-%d")
+            quota = FREE_DAILY_QUOTA
+            quota_msg = f"本月 {MONTHLY_QUOTA} 題已用完，已降回每日 {FREE_DAILY_QUOTA} 題免費版。"
     else:
         period = datetime.now().strftime("%Y-%m-%d")
         quota = FREE_DAILY_QUOTA
@@ -327,9 +334,16 @@ def handle_image(event):
     logger.info(f"User {user_id} sent an image")
 
     if is_paid:
-        period = datetime.now().strftime("%Y-%m")
-        quota = MONTHLY_QUOTA
-        quota_msg = f"本月 {MONTHLY_QUOTA} 題額度已用完，請傳「訂閱」了解加購方式。"
+        month_period = datetime.now().strftime("%Y-%m")
+        monthly_usage = get_usage(user_id, month_period)
+        if monthly_usage < MONTHLY_QUOTA:
+            period = month_period
+            quota = MONTHLY_QUOTA
+            quota_msg = ""
+        else:
+            period = datetime.now().strftime("%Y-%m-%d")
+            quota = FREE_DAILY_QUOTA
+            quota_msg = f"本月 {MONTHLY_QUOTA} 題已用完，已降回每日 {FREE_DAILY_QUOTA} 題免費版。"
     else:
         period = datetime.now().strftime("%Y-%m-%d")
         quota = FREE_DAILY_QUOTA
