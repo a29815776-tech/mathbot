@@ -50,7 +50,7 @@ def handle_message(event):
     logger.info(f"User message: {user_message}")
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash-preview-04-17",
             contents="請用繁體中文回答：" + user_message
         )
         reply_text = response.text
