@@ -20,6 +20,10 @@ handler = WebhookHandler(os.environ.get("LINE_CHANNEL_SECRET"))
 
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
+# 每個用戶保留最近 10 則對話
+conversation_history = {}
+MAX_HISTORY = 10
+
 SYSTEM_PROMPT = """你是一個專門幫助台灣高中生解數學題的助手，針對108課綱設計。
 
 解題規則：
@@ -64,17 +68,26 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
+    user_id = event.source.user_id
     user_message = event.message.text
-    logger.info(f"User message: {user_message}")
+    logger.info(f"User {user_id}: {user_message}")
+
+    if user_id not in conversation_history:
+        conversation_history[user_id] = []
+
+    conversation_history[user_id].append({"role": "user", "content": user_message})
+
+    # 只保留最近 MAX_HISTORY 則
+    if len(conversation_history[user_id]) > MAX_HISTORY:
+        conversation_history[user_id] = conversation_history[user_id][-MAX_HISTORY:]
+
     try:
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_message}
-            ]
+            messages=[{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history[user_id]
         )
         reply_text = response.choices[0].message.content[:4900]
+        conversation_history[user_id].append({"role": "assistant", "content": reply_text})
         logger.info(f"Groq reply: {reply_text[:100]}")
     except Exception as e:
         logger.error(f"Groq error: {e}\n{traceback.format_exc()}")
