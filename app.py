@@ -10,6 +10,7 @@ import base64
 import re
 import requests
 import psycopg2
+import json
 from datetime import datetime
 
 logging.basicConfig(
@@ -45,6 +46,13 @@ def init_db():
                     month TEXT
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS conversations (
+                    user_id TEXT PRIMARY KEY,
+                    history TEXT,
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
 
 def get_usage(user_id, period):
     with get_db() as conn:
@@ -66,6 +74,23 @@ def increment_usage(user_id, period):
                 INSERT INTO usage (user_id, count, month) VALUES (%s, 1, %s)
                 ON CONFLICT (user_id) DO UPDATE SET count = usage.count + 1, month = %s
             """, (user_id, period, period))
+
+def load_history(user_id):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT history FROM conversations WHERE user_id = %s", (user_id,))
+            row = cur.fetchone()
+            if row:
+                return json.loads(row[0])
+            return []
+
+def save_history(user_id, history):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO conversations (user_id, history, updated_at) VALUES (%s, %s, NOW())
+                ON CONFLICT (user_id) DO UPDATE SET history = %s, updated_at = NOW()
+            """, (user_id, json.dumps(history), json.dumps(history)))
 
 try:
     init_db()
@@ -114,6 +139,13 @@ def get_model(user_id):
 def call_ai(model, messages):
     return groq_client.chat.completions.create(model=model, messages=messages)
 
+def notify_admin(msg):
+    if ADMIN_LINE_ID:
+        try:
+            line_bot_api.push_message(ADMIN_LINE_ID, TextSendMessage(text=f"[Bot錯誤通知]\n{msg}"))
+        except Exception:
+            pass
+
 def clean_response(text):
     text = re.sub(r'#{1,6}\s*', '', text)
     text = re.sub(r'\*{1,3}(.*?)\*{1,3}', r'\1', text)
@@ -131,7 +163,6 @@ def clean_response(text):
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
-conversation_history = {}
 MAX_HISTORY = 10
 
 SYSTEM_PROMPT = """你是一個專門幫助台灣高中生解數學題的助手，針對108課綱設計。
@@ -254,19 +285,25 @@ def handle_message(event):
     except Exception as e:
         logger.error(f"Usage check error: {e}")
 
-    if user_id not in conversation_history:
-        conversation_history[user_id] = []
+    try:
+        history = load_history(user_id)
+    except Exception as e:
+        logger.error(f"Load history error: {e}")
+        history = []
 
-    conversation_history[user_id].append({"role": "user", "content": user_message})
-
-    if len(conversation_history[user_id]) > MAX_HISTORY:
-        conversation_history[user_id] = conversation_history[user_id][-MAX_HISTORY:]
+    history.append({"role": "user", "content": user_message})
+    if len(history) > MAX_HISTORY:
+        history = history[-MAX_HISTORY:]
 
     reply_text = "抱歉，系統暫時無法回應，請稍後再試。"
     try:
-        response = call_ai(model, [{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history[user_id])
+        response = call_ai(model, [{"role": "system", "content": SYSTEM_PROMPT}] + history)
         reply_text = clean_response(response.choices[0].message.content)[:4900]
-        conversation_history[user_id].append({"role": "assistant", "content": reply_text})
+        history.append({"role": "assistant", "content": reply_text})
+        try:
+            save_history(user_id, history)
+        except Exception as e:
+            logger.error(f"Save history error: {e}")
         try:
             increment_usage(user_id, period)
         except Exception as e:
@@ -274,6 +311,7 @@ def handle_message(event):
         logger.info(f"Reply: {reply_text[:100]}")
     except Exception as e:
         logger.error(f"AI error: {e}\n{traceback.format_exc()}")
+        notify_admin(f"AI error for user {user_id}: {e}")
     try:
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         logger.info("Reply sent successfully")
@@ -324,6 +362,7 @@ def handle_image(event):
         logger.info(f"Vision reply: {reply_text[:100]}")
     except Exception as e:
         logger.error(f"Image handling error: {e}\n{traceback.format_exc()}")
+        notify_admin(f"Image error for user {user_id}: {e}")
         reply_text = "抱歉，無法處理圖片，請稍後再試。"
     try:
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
