@@ -20,38 +20,37 @@ app = Flask(__name__)
 line_bot_api = LineBotApi(os.environ.get("LINE_CHANNEL_ACCESS_TOKEN"))
 handler = WebhookHandler(os.environ.get("LINE_CHANNEL_SECRET"))
 
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
+# 付費用戶的 LINE user ID，用逗號分隔存在環境變數 PAID_USER_IDS
+PAID_USER_IDS = set(uid.strip() for uid in os.environ.get("PAID_USER_IDS", "").split(",") if uid.strip())
+
+FREE_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+PAID_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"  # 之後換成 Claude
+
+def get_model(user_id):
+    return PAID_MODEL if user_id in PAID_USER_IDS else FREE_MODEL
+
+def call_ai(model, messages):
+    return groq_client.chat.completions.create(model=model, messages=messages)
 
 def clean_response(text):
-    # 移除 Markdown 標題
     text = re.sub(r'#{1,6}\s*', '', text)
-    # 移除粗體/斜體
     text = re.sub(r'\*{1,3}(.*?)\*{1,3}', r'\1', text)
-    # \frac{a}{b} → a/b
     text = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'\1/\2', text)
-    # \sqrt{x} → √x
     text = re.sub(r'\\sqrt\{([^}]+)\}', r'√\1', text)
     text = re.sub(r'\\sqrt\s+(\S+)', r'√\1', text)
-    # \vec{AB} 或 \overrightarrow{AB} → AB向量
     text = re.sub(r'\\(?:vec|overrightarrow)\{([^}]+)\}', r'\1向量', text)
-    # \cdot → ×
     text = re.sub(r'\\cdot', '×', text)
-    # \times → ×
     text = re.sub(r'\\times', '×', text)
-    # \hat{i} → i
     text = re.sub(r'\\hat\{([^}]+)\}', r'\1', text)
-    # 移除 \begin{...}...\end{...} 行列式區塊
     text = re.sub(r'\\begin\{[^}]+\}.*?\\end\{[^}]+\}', '(行列式計算)', flags=re.DOTALL, string=text)
-    # 移除多餘的 $ 符號
     text = re.sub(r'\$+', '', text)
-    # 移除反斜線開頭的其他 LaTeX 指令
     text = re.sub(r'\\[a-zA-Z]+\{([^}]*)\}', r'\1', text)
     text = re.sub(r'\\[a-zA-Z]+', '', text)
-    # 清理多餘空行
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
-# 每個用戶保留最近 10 則對話
 conversation_history = {}
 MAX_HISTORY = 10
 
@@ -79,6 +78,7 @@ SYSTEM_PROMPT = """你是一個專門幫助台灣高中生解數學題的助手�
 
 常見觀念澄清（學生容易誤解，請主動說明清楚）：
 - 外積不需要垂直：|AB向量 × AC向量| = |AB||AC|sin θ，sin θ 已包含夾角，所以任意兩向量都能用外積算平行四邊形面積，再除以2得三角形面積，不需要兩向量垂直
+- 三維向量 (a,b,c) 的長度 = √(a²+b²+c²)，這是基本定義
 - 內積為零才代表垂直，外積的大小代表平行四邊形面積
 - 相似三角形面積比 = 邊長比的平方
 - 排列組合：有限制條件的要先處理限制條件
@@ -89,12 +89,9 @@ SYSTEM_PROMPT = """你是一個專門幫助台灣高中生解數學題的助手�
 - 空間中兩直線可能為歪斜線（不相交也不平行）"""
 
 @app.route("/test")
-def test_groq():
+def test_api():
     try:
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": "say hi in traditional chinese"}]
-        )
+        response = call_ai(FREE_MODEL, [{"role": "user", "content": "say hi in traditional chinese"}])
         return f"OK: {response.choices[0].message.content}"
     except Exception as e:
         return f"ERROR: {e}\n{traceback.format_exc()}", 500
@@ -118,33 +115,28 @@ def callback():
 def handle_message(event):
     user_id = event.source.user_id
     user_message = event.message.text
-    logger.info(f"User {user_id}: {user_message}")
+    model = get_model(user_id)
+    is_paid = user_id in PAID_USER_IDS
+    logger.info(f"User {user_id} ({'paid' if is_paid else 'free'}): {user_message}")
 
     if user_id not in conversation_history:
         conversation_history[user_id] = []
 
     conversation_history[user_id].append({"role": "user", "content": user_message})
 
-    # 只保留最近 MAX_HISTORY 則
     if len(conversation_history[user_id]) > MAX_HISTORY:
         conversation_history[user_id] = conversation_history[user_id][-MAX_HISTORY:]
 
     try:
-        response = client.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-            messages=[{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history[user_id]
-        )
+        response = call_ai(model, [{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history[user_id])
         reply_text = clean_response(response.choices[0].message.content)[:4900]
         conversation_history[user_id].append({"role": "assistant", "content": reply_text})
-        logger.info(f"Groq reply: {reply_text[:100]}")
+        logger.info(f"Reply: {reply_text[:100]}")
     except Exception as e:
-        logger.error(f"Groq error: {e}\n{traceback.format_exc()}")
+        logger.error(f"AI error: {e}\n{traceback.format_exc()}")
         reply_text = "抱歉，系統暫時無法回應，請稍後再試。"
     try:
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=reply_text)
-        )
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         logger.info("Reply sent successfully")
     except Exception as e:
         logger.error(f"LINE reply error: {e}\n{traceback.format_exc()}")
@@ -152,32 +144,27 @@ def handle_message(event):
 @handler.add(MessageEvent, message=ImageMessage)
 def handle_image(event):
     user_id = event.source.user_id
+    model = get_model(user_id)
     logger.info(f"User {user_id} sent an image")
     try:
         message_content = line_bot_api.get_message_content(event.message.id)
         image_data = b"".join(chunk for chunk in message_content.iter_content())
         image_base64 = base64.b64encode(image_data).decode("utf-8")
 
-        response = client.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": [
-                    {"type": "text", "text": "請看這張圖片中的數學題目並解題。"},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
-                ]}
-            ]
-        )
+        response = call_ai(model, [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": [
+                {"type": "text", "text": "請看這張圖片中的數學題目並解題。"},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
+            ]}
+        ])
         reply_text = clean_response(response.choices[0].message.content)[:4900]
         logger.info(f"Vision reply: {reply_text[:100]}")
     except Exception as e:
         logger.error(f"Image handling error: {e}\n{traceback.format_exc()}")
         reply_text = "抱歉，無法處理圖片，請稍後再試。"
     try:
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=reply_text)
-        )
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
     except Exception as e:
         logger.error(f"LINE reply error: {e}\n{traceback.format_exc()}")
 
