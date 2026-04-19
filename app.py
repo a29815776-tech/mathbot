@@ -131,7 +131,7 @@ def handle_message(event):
 
     try:
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="meta-llama/llama-4-maverick-17b-128e-instruct",
             messages=[{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history[user_id]
         )
         reply_text = clean_response(response.choices[0].message.content)[:4900]
