@@ -7,6 +7,7 @@ import os
 import logging
 import traceback
 import base64
+import re
 
 logging.basicConfig(
     level=logging.INFO,
@@ -20,6 +21,35 @@ line_bot_api = LineBotApi(os.environ.get("LINE_CHANNEL_ACCESS_TOKEN"))
 handler = WebhookHandler(os.environ.get("LINE_CHANNEL_SECRET"))
 
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
+def clean_response(text):
+    # 移除 Markdown 標題
+    text = re.sub(r'#{1,6}\s*', '', text)
+    # 移除粗體/斜體
+    text = re.sub(r'\*{1,3}(.*?)\*{1,3}', r'\1', text)
+    # \frac{a}{b} → a/b
+    text = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'\1/\2', text)
+    # \sqrt{x} → √x
+    text = re.sub(r'\\sqrt\{([^}]+)\}', r'√\1', text)
+    text = re.sub(r'\\sqrt\s+(\S+)', r'√\1', text)
+    # \vec{AB} 或 \overrightarrow{AB} → AB向量
+    text = re.sub(r'\\(?:vec|overrightarrow)\{([^}]+)\}', r'\1向量', text)
+    # \cdot → ×
+    text = re.sub(r'\\cdot', '×', text)
+    # \times → ×
+    text = re.sub(r'\\times', '×', text)
+    # \hat{i} → i
+    text = re.sub(r'\\hat\{([^}]+)\}', r'\1', text)
+    # 移除 \begin{...}...\end{...} 行列式區塊
+    text = re.sub(r'\\begin\{[^}]+\}.*?\\end\{[^}]+\}', '(行列式計算)', flags=re.DOTALL, string=text)
+    # 移除多餘的 $ 符號
+    text = re.sub(r'\$+', '', text)
+    # 移除反斜線開頭的其他 LaTeX 指令
+    text = re.sub(r'\\[a-zA-Z]+\{([^}]*)\}', r'\1', text)
+    text = re.sub(r'\\[a-zA-Z]+', '', text)
+    # 清理多餘空行
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
 
 # 每個用戶保留最近 10 則對話
 conversation_history = {}
@@ -93,7 +123,7 @@ def handle_message(event):
             model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history[user_id]
         )
-        reply_text = response.choices[0].message.content[:4900]
+        reply_text = clean_response(response.choices[0].message.content)[:4900]
         conversation_history[user_id].append({"role": "assistant", "content": reply_text})
         logger.info(f"Groq reply: {reply_text[:100]}")
     except Exception as e:
@@ -127,7 +157,7 @@ def handle_image(event):
                 ]}
             ]
         )
-        reply_text = response.choices[0].message.content[:4900]
+        reply_text = clean_response(response.choices[0].message.content)[:4900]
         logger.info(f"Vision reply: {reply_text[:100]}")
     except Exception as e:
         logger.error(f"Image handling error: {e}\n{traceback.format_exc()}")
