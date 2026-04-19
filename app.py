@@ -30,6 +30,7 @@ PAID_USER_IDS = set(uid.strip() for uid in os.environ.get("PAID_USER_IDS", "").s
 ADMIN_LINE_ID = os.environ.get("ADMIN_LINE_ID", "")
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 MONTHLY_QUOTA = 200
+FREE_DAILY_QUOTA = 14
 
 def get_db():
     return psycopg2.connect(DATABASE_URL)
@@ -45,28 +46,26 @@ def init_db():
                 )
             """)
 
-def get_usage(user_id):
-    month = datetime.now().strftime("%Y-%m")
+def get_usage(user_id, period):
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT count, month FROM usage WHERE user_id = %s", (user_id,))
             row = cur.fetchone()
-            if not row or row[1] != month:
+            if not row or row[1] != period:
                 cur.execute("""
                     INSERT INTO usage (user_id, count, month) VALUES (%s, 0, %s)
                     ON CONFLICT (user_id) DO UPDATE SET count = 0, month = %s
-                """, (user_id, month, month))
+                """, (user_id, period, period))
                 return 0
             return row[0]
 
-def increment_usage(user_id):
-    month = datetime.now().strftime("%Y-%m")
+def increment_usage(user_id, period):
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO usage (user_id, count, month) VALUES (%s, 1, %s)
                 ON CONFLICT (user_id) DO UPDATE SET count = usage.count + 1, month = %s
-            """, (user_id, month, month))
+            """, (user_id, period, period))
 
 try:
     init_db()
@@ -239,15 +238,21 @@ def handle_message(event):
         return
 
     if is_paid:
-        try:
-            usage = get_usage(user_id)
-            if usage >= MONTHLY_QUOTA:
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(
-                    text=f"本月 {MONTHLY_QUOTA} 題額度已用完，請傳「訂閱」了解加購方式。"
-                ))
-                return
-        except Exception as e:
-            logger.error(f"Usage check error: {e}")
+        period = datetime.now().strftime("%Y-%m")
+        quota = MONTHLY_QUOTA
+        quota_msg = f"本月 {MONTHLY_QUOTA} 題額度已用完，請傳「訂閱」了解加購方式。"
+    else:
+        period = datetime.now().strftime("%Y-%m-%d")
+        quota = FREE_DAILY_QUOTA
+        quota_msg = f"今日免費額度（{FREE_DAILY_QUOTA} 題）已用完，明天再來或傳「訂閱」升級進階版。"
+
+    try:
+        usage = get_usage(user_id, period)
+        if usage >= quota:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=quota_msg))
+            return
+    except Exception as e:
+        logger.error(f"Usage check error: {e}")
 
     if user_id not in conversation_history:
         conversation_history[user_id] = []
@@ -262,11 +267,10 @@ def handle_message(event):
         response = call_ai(model, [{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history[user_id])
         reply_text = clean_response(response.choices[0].message.content)[:4900]
         conversation_history[user_id].append({"role": "assistant", "content": reply_text})
-        if is_paid:
-            try:
-                increment_usage(user_id)
-            except Exception as e:
-                logger.error(f"Usage increment error: {e}")
+        try:
+            increment_usage(user_id, period)
+        except Exception as e:
+            logger.error(f"Usage increment error: {e}")
         logger.info(f"Reply: {reply_text[:100]}")
     except Exception as e:
         logger.error(f"AI error: {e}\n{traceback.format_exc()}")
@@ -284,15 +288,21 @@ def handle_image(event):
     logger.info(f"User {user_id} sent an image")
 
     if is_paid:
-        try:
-            usage = get_usage(user_id)
-            if usage >= MONTHLY_QUOTA:
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(
-                    text=f"本月 {MONTHLY_QUOTA} 題額度已用完，請傳「訂閱」了解加購方式。"
-                ))
-                return
-        except Exception as e:
-            logger.error(f"Usage check error: {e}")
+        period = datetime.now().strftime("%Y-%m")
+        quota = MONTHLY_QUOTA
+        quota_msg = f"本月 {MONTHLY_QUOTA} 題額度已用完，請傳「訂閱」了解加購方式。"
+    else:
+        period = datetime.now().strftime("%Y-%m-%d")
+        quota = FREE_DAILY_QUOTA
+        quota_msg = f"今日免費額度（{FREE_DAILY_QUOTA} 題）已用完，明天再來或傳「訂閱」升級進階版。"
+
+    try:
+        usage = get_usage(user_id, period)
+        if usage >= quota:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=quota_msg))
+            return
+    except Exception as e:
+        logger.error(f"Usage check error: {e}")
 
     try:
         message_content = line_bot_api.get_message_content(event.message.id)
@@ -307,11 +317,10 @@ def handle_image(event):
             ]}
         ])
         reply_text = clean_response(response.choices[0].message.content)[:4900]
-        if is_paid:
-            try:
-                increment_usage(user_id)
-            except Exception as e:
-                logger.error(f"Usage increment error: {e}")
+        try:
+            increment_usage(user_id, period)
+        except Exception as e:
+            logger.error(f"Usage increment error: {e}")
         logger.info(f"Vision reply: {reply_text[:100]}")
     except Exception as e:
         logger.error(f"Image handling error: {e}\n{traceback.format_exc()}")
