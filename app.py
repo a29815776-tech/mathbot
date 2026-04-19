@@ -5,6 +5,14 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 from google import genai
 import os
+import logging
+import traceback
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -23,31 +31,43 @@ SYSTEM_PROMPT = """你是一個專門幫助台灣高中生解數學題的助手�
 
 @app.route("/callback", methods=['POST'])
 def callback():
-    signature = request.headers['X-Line-Signature']
+    signature = request.headers.get('X-Line-Signature', '')
     body = request.get_data(as_text=True)
+    logger.info(f"Webhook received, body length: {len(body)}")
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
+        logger.error("Invalid signature")
         abort(400)
+    except Exception as e:
+        logger.error(f"Webhook handler error: {e}\n{traceback.format_exc()}")
+        abort(500)
     return 'OK'
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_message = event.message.text
+    logger.info(f"User message: {user_message}")
     try:
         response = client.models.generate_content(
-    model="gemini-2.0-flash",
-    contents="請用繁體中文回答：" + user_message
-)
+            model="gemini-2.0-flash",
+            contents="請用繁體中文回答：" + user_message
+        )
         reply_text = response.text
+        logger.info(f"Gemini reply: {reply_text[:100]}")
     except Exception as e:
-        print(f"Gemini error: {e}")
+        logger.error(f"Gemini error: {e}\n{traceback.format_exc()}")
         reply_text = "抱歉，系統暫時無法回應，請稍後再試。"
-    line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(text=reply_text)
-    )
+    try:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=reply_text)
+        )
+        logger.info("Reply sent successfully")
+    except Exception as e:
+        logger.error(f"LINE reply error: {e}\n{traceback.format_exc()}")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
+    logger.info(f"Starting server on port {port}")
     app.run(host="0.0.0.0", port=port)
