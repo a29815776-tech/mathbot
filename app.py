@@ -244,6 +244,7 @@ SUBSCRIBE_MSG = """訂閱進階版數學機器人
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_id = event.source.user_id
+    quota_id = f"math:{user_id}"
     user_message = event.message.text
     model = get_model(user_id)
     is_paid = user_id in PAID_USER_IDS
@@ -278,7 +279,7 @@ def handle_message(event):
 
     if is_paid:
         month_period = datetime.now().strftime("%Y-%m")
-        monthly_usage = get_usage(user_id, month_period)
+        monthly_usage = get_usage(quota_id, month_period)
         if monthly_usage < MONTHLY_QUOTA:
             period = month_period
             quota = MONTHLY_QUOTA
@@ -293,7 +294,7 @@ def handle_message(event):
         quota_msg = f"今日免費額度（{FREE_DAILY_QUOTA} 則）已用完，明天再來或傳「訂閱」升級進階版。"
 
     try:
-        usage = get_usage(user_id, period)
+        usage = get_usage(quota_id, period)
         if usage >= quota:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=quota_msg))
             return
@@ -320,7 +321,7 @@ def handle_message(event):
         except Exception as e:
             logger.error(f"Save history error: {e}")
         try:
-            increment_usage(user_id, period)
+            increment_usage(quota_id, period)
         except Exception as e:
             logger.error(f"Usage increment error: {e}")
         logger.info(f"Reply: {reply_text[:100]}")
@@ -336,13 +337,14 @@ def handle_message(event):
 @handler.add(MessageEvent, message=ImageMessage)
 def handle_image(event):
     user_id = event.source.user_id
+    quota_id = f"math:{user_id}"
     is_paid = user_id in PAID_USER_IDS
     model = get_model(user_id)
     logger.info(f"User {user_id} sent an image")
 
     if is_paid:
         month_period = datetime.now().strftime("%Y-%m")
-        monthly_usage = get_usage(user_id, month_period)
+        monthly_usage = get_usage(quota_id, month_period)
         if monthly_usage < MONTHLY_QUOTA:
             period = month_period
             quota = MONTHLY_QUOTA
@@ -357,7 +359,7 @@ def handle_image(event):
         quota_msg = f"今日免費額度（{FREE_DAILY_QUOTA} 則）已用完，明天再來或傳「訂閱」升級進階版。"
 
     try:
-        usage = get_usage(user_id, period)
+        usage = get_usage(quota_id, period)
         if usage >= quota:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=quota_msg))
             return
@@ -378,7 +380,7 @@ def handle_image(event):
         ])
         reply_text = clean_response(response.choices[0].message.content)[:4900]
         try:
-            increment_usage(user_id, period)
+            increment_usage(quota_id, period)
         except Exception as e:
             logger.error(f"Usage increment error: {e}")
         logger.info(f"Vision reply: {reply_text[:100]}")
