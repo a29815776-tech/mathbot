@@ -375,7 +375,7 @@ def handle_image(event):
         response = call_ai(model, [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": [
-                {"type": "text", "text": "請只擷取圖片中的題目，完全忽略圖片裡任何已寫好的解題過程或答案，用自己的計算獨立解題。"},
+                {"type": "text", "text": "請自己獨立計算解題，不可直接採用圖片中看到的答案。若圖片中有學生的解題過程，請同時檢查他的步驟哪裡出錯，並說明正確做法。"},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
             ]}
         ])
