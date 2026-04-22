@@ -159,8 +159,17 @@ def clean_response(text):
     text = re.sub(r'\\hat\{([^}]+)\}', r'\1', text)
     text = re.sub(r'\\begin\{[^}]+\}.*?\\end\{[^}]+\}', '(行列式計算)', flags=re.DOTALL, string=text)
     text = re.sub(r'\$+', '', text)
-    text = re.sub(r'\\[a-zA-Z]+\{([^}]*)\}', r'\1', text)
-    text = re.sub(r'\\[a-zA-Z]+', '', text)
+    # 重複處理直到沒有殘留（處理巢狀結構）
+    for _ in range(8):
+        prev = text
+        text = re.sub(r'\\frac\{([^{}]*)\}\{([^{}]*)\}', r'\1/\2', text)
+        text = re.sub(r'\\sqrt\{([^{}]*)\}', r'√\1', text)
+        text = re.sub(r'\\(?:vec|overrightarrow)\{([^{}]*)\}', r'\1向量', text)
+        text = re.sub(r'\\[a-zA-Z]+\{([^{}]*)\}', r'\1', text)
+        text = re.sub(r'\\[a-zA-Z]+', '', text)
+        text = re.sub(r'\{([^{}]*)\}', r'\1', text)
+        if text == prev:
+            break
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
