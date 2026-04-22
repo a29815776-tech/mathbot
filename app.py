@@ -147,6 +147,7 @@ def notify_admin(msg):
             pass
 
 def clean_response(text):
+    text = text.replace('¥', '\\')
     text = re.sub(r'#{1,6}\s*', '', text)
     text = re.sub(r'\*{1,3}(.*?)\*{1,3}', r'\1', text)
     text = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'\1/\2', text)
